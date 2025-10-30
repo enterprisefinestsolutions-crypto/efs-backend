@@ -1,17 +1,17 @@
 const express = require('express');
 const multer = require('multer');
-const nodemailer = require('nodemailer');
 const cors = require('cors');
+const { Resend } = require('resend');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Use memory storage for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Handle form submission
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 app.post('/send-estimate', upload.fields([
   { name: 'voided_check', maxCount: 1 },
   { name: 'drivers_license', maxCount: 1 }
@@ -26,16 +26,8 @@ app.post('/send-estimate', upload.fields([
       return res.status(400).json({ error: 'Missing file(s)' });
     }
 
-    const transporter = nodemailer.createTransport({
-      service: 'Gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
-    const mailOptions = {
-      from: `"EFS Estimate" <${process.env.EMAIL_USER}>`,
+    const emailResponse = await resend.emails.send({
+      from: 'EFS Estimate <info@enterprisefinestsolutions.com>',
       to: 'info@enterprisefinestsolutions.com',
       subject: 'New Estimate Submission',
       text: `
@@ -50,25 +42,27 @@ Balance: $${balance}
       attachments: [
         {
           filename: voidedCheckFile.originalname,
-          content: voidedCheckFile.buffer
+          content: voidedCheckFile.buffer.toString('base64'),
         },
         {
           filename: driversLicenseFile.originalname,
-          content: driversLicenseFile.buffer
+          content: driversLicenseFile.buffer.toString('base64'),
         }
       ]
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    res.status(200).json({ success: true, message: 'Estimate sent successfully!' });
+    if (emailResponse.error) {
+      throw new Error(emailResponse.error.message);
+    }
+
+    res.status(200).json({ success: true, message: 'Estimate sent successfully via Resend.' });
 
   } catch (err) {
-    console.error('Email error:', err);
-    res.status(500).json({ success: false, message: 'Failed to send email.' });
+    console.error('Resend error:', err);
+    res.status(500).json({ success: false, message: 'Failed to send via Resend.' });
   }
 });
 
-// ✅ Use dynamic port for Render (critical!)
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server started on port ${PORT}`);
