@@ -1,66 +1,69 @@
 const express = require('express');
-const cors = require('cors');
 const multer = require('multer');
-const bodyParser = require('body-parser');
+const cors = require('cors');
 const { Resend } = require('resend');
-
 const app = express();
 const port = process.env.PORT || 10000;
+
+// Middleware
+app.use(cors());
 const upload = multer();
 
-// Initialize Resend with your API Key
-const resend = new Resend('re_DY9AvNU8_GzCi3B991bAUGMLLTovgz9c7');
+// Initialize Resend with your API key
+const resend = new Resend('re_DY9AvNU8_GzCi3B991bAUGMLLTovgz9c7'); // use your actual key securely in production
 
-app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
+// Endpoint to receive estimate form data
 app.post('/send-estimate', upload.fields([
   { name: 'voided_check', maxCount: 1 },
   { name: 'drivers_license', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    const {
-      funding_amount,
-      term_days,
-      payment_per_day,
-      factor,
-      balance
-    } = req.body;
+    const { funding_amount, term_days, payment_per_day, factor, balance } = req.body;
 
-    // Optional: you can log this to verify data
-    console.log('Received:', req.body);
+    const voidedFile = req.files['voided_check']?.[0];
+    const licenseFile = req.files['drivers_license']?.[0];
 
-    const htmlContent = `
-      <h2>New Funding Estimate Request</h2>
-      <ul>
-        <li><strong>Funding Amount:</strong> $${funding_amount}</li>
-        <li><strong>Term:</strong> ${term_days} days</li>
-        <li><strong>Payment per Day:</strong> $${payment_per_day}</li>
-        <li><strong>Factor Rate:</strong> ${factor}</li>
-        <li><strong>Balance:</strong> $${balance}</li>
-      </ul>
+    const html = `
+      <h3>New Estimate Request</h3>
+      <p><strong>Funding Amount:</strong> $${funding_amount}</p>
+      <p><strong>Term:</strong> ${term_days} Days</p>
+      <p><strong>Daily Payment:</strong> $${payment_per_day}</p>
+      <p><strong>Factor Rate:</strong> ${factor}</p>
+      <p><strong>Balance:</strong> $${balance}</p>
     `;
 
-    const response = await resend.emails.send({
+    const attachments = [];
+
+    if (voidedFile) {
+      attachments.push({
+        filename: voidedFile.originalname,
+        content: voidedFile.buffer.toString('base64'),
+        encoding: 'base64'
+      });
+    }
+
+    if (licenseFile) {
+      attachments.push({
+        filename: licenseFile.originalname,
+        content: licenseFile.buffer.toString('base64'),
+        encoding: 'base64'
+      });
+    }
+
+    const emailResponse = await resend.emails.send({
       from: 'info@enterprisefinestsolutions.com',
       to: 'info@enterprisefinestsolutions.com',
-      subject: 'Estimate Request from Website',
-      html: htmlContent
+      subject: 'New Funding Estimate Request',
+      html,
+      attachments
     });
 
-    console.log('Email sent:', response);
-    res.status(200).json({ message: 'Estimate sent successfully!' });
-
-  } catch (error) {
-    console.error('SERVER ERROR:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    console.log('Email sent:', emailResponse);
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('SERVER ERROR:', err);
+    res.status(500).send('Something went wrong.');
   }
-});
-
-// Default route (optional)
-app.get('/', (req, res) => {
-  res.send('EFS Email Backend is running');
 });
 
 app.listen(port, () => {
