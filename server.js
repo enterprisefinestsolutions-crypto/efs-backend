@@ -2,77 +2,74 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const { Resend } = require('resend');
+require('dotenv').config();
+
 const app = express();
-const port = process.env.PORT || 10000;
+const upload = multer(); // Use memory storage
 
-// ✅ Use CORS — allow your frontend origin
-app.use(cors({
-  origin: 'https://enterprisefinestsolutions.com',
-  methods: ['POST'],
-  allowedHeaders: ['Content-Type']
-}));
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ✅ Configure file uploads
-const upload = multer({ storage: multer.memoryStorage() });
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ✅ Load Resend
-const resend = new Resend('re_DY9AvNU8_GzCi3B991bAUGMLLTovgz9c7'); // Replace with your real key if different
-
-// ✅ API endpoint
+// POST endpoint
 app.post('/send-estimate', upload.fields([
   { name: 'voided_check', maxCount: 1 },
   { name: 'drivers_license', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    const data = req.body;
-    const files = req.files;
+    const {
+      funding_amount = 'N/A',
+      term_days = 'N/A',
+      payment_per_day = 'N/A',
+      factor = 'N/A',
+      balance = 'N/A'
+    } = req.body || {};
 
-    // Required fields check
-    if (!data.funding_amount || !data.term_days || !data.payment_per_day || !files?.voided_check || !files?.drivers_license) {
-      return res.status(400).send('Missing required data or files');
+    if (!req.body) {
+      throw new Error('Missing form fields (req.body is undefined)');
     }
 
-    const attachments = [
-      {
-        filename: 'voided_check.pdf',
-        content: files.voided_check[0].buffer.toString('base64'),
-        encoding: 'base64'
-      },
-      {
-        filename: 'drivers_license.pdf',
-        content: files.drivers_license[0].buffer.toString('base64'),
-        encoding: 'base64'
-      }
-    ];
+    const voidedCheck = req.files?.voided_check?.[0];
+    const driversLicense = req.files?.drivers_license?.[0];
+
+    if (!voidedCheck || !driversLicense) {
+      return res.status(400).json({ error: 'Both attachments are required' });
+    }
 
     const html = `
-      <h2>New Estimate Request</h2>
-      <ul>
-        <li><strong>Funding Amount:</strong> $${data.funding_amount}</li>
-        <li><strong>Term (days):</strong> ${data.term_days}</li>
-        <li><strong>Payment per Day:</strong> $${data.payment_per_day}</li>
-        <li><strong>Factor Rate:</strong> ${data.factor}</li>
-        <li><strong>Balance:</strong> $${data.balance}</li>
-      </ul>
+      <h3>New Estimate Submission</h3>
+      <p><strong>Funding Amount:</strong> $${funding_amount}</p>
+      <p><strong>Term:</strong> ${term_days} days</p>
+      <p><strong>Daily Payment:</strong> $${payment_per_day}</p>
+      <p><strong>Factor Rate:</strong> ${factor}</p>
+      <p><strong>Balance:</strong> $${balance}</p>
     `;
 
     const email = await resend.emails.send({
-      from: 'EFS Calculator <info@enterprisefinestsolutions.com>',
+      from: 'EFS Calculator <noreply@enterprisefinestsolutions.com>',
       to: ['info@enterprisefinestsolutions.com'],
-      subject: 'New Estimate Request Submitted',
+      subject: 'New Estimate Submitted',
       html,
-      attachments
+      attachments: [
+        {
+          filename: voidedCheck.originalname,
+          content: voidedCheck.buffer
+        },
+        {
+          filename: driversLicense.originalname,
+          content: driversLicense.buffer
+        }
+      ]
     });
 
-    console.log('Resend Email Sent:', email.id || email);
-    res.status(200).send('Email sent');
+    return res.status(200).json({ success: true, messageId: email.id });
   } catch (err) {
-    console.error('SERVER ERROR:', err);
-    res.status(500).send('Something went wrong');
+    console.error('SERVER ERROR:', err.message);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ✅ Start the server
-app.listen(port, () => {
-  console.log(`Server started on port ${port}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
